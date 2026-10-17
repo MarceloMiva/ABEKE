@@ -4,6 +4,7 @@ from typing import List, Optional
 
 from .. import models, schemas
 from ..database import get_db
+from ..services import playbooks
 
 router = APIRouter(prefix="/incidents", tags=["incidents"])
 
@@ -45,9 +46,16 @@ def update_incident(incident_id: str, update: schemas.IncidentUpdate, db: Sessio
     return incident
 
 
+@router.get("/{incident_id}/playbook", response_model=dict)
+def get_incident_playbook(incident_id: str, db: Session = Depends(get_db)):
+    incident = db.query(models.Incident).get(incident_id)
+    if not incident:
+        raise HTTPException(status_code=404, detail="Incident not found")
+    return {"incident_id": incident.id, "playbook": playbooks.get_playbook(incident)}
+
+
 @router.get("/{incident_id}/report", response_model=dict)
 def get_incident_report(incident_id: str, db: Session = Depends(get_db)):
-    """Markdown-ready incident report for export (feeds the PDF/markdown export feature)."""
     incident = db.query(models.Incident).get(incident_id)
     if not incident:
         raise HTTPException(status_code=404, detail="Incident not found")
