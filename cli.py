@@ -9,6 +9,7 @@ running locally — start that first with:
 import os
 import sys
 import json
+import time
 import datetime
 
 try:
@@ -25,6 +26,7 @@ CYAN = "\033[38;5;45m"
 DIM_BLUE = "\033[38;5;24m"
 GREEN = "\033[92m"
 YELLOW = "\033[93m"
+RED = "\033[91m"
 WHITE = "\033[97m"
 GRAY = "\033[90m"
 BOLD = "\033[1m"
@@ -58,6 +60,9 @@ CATEGORIES = [
     ("Incident Store",    "/incidents",     4, "ACTIVE"),
     ("Knowledge Base",    "/iocs",          1, "ACTIVE"),
     ("Reporting",         "/incidents/{id}/report", 1, "ACTIVE"),
+    ("Threat Intel Feed", "/intel",         2, "ACTIVE"),
+    ("Playbook Automation", "/incidents/{id}/playbook", 1, "ACTIVE"),
+    ("Live Dashboard",    "cli: dashboard", 1, "ACTIVE"),
 ]
 
 
@@ -94,6 +99,10 @@ def banner():
     print(f"  {CYAN}incidents{RESET}          - List open incidents from the API")
     print(f"  {CYAN}iocs{RESET}               - List known IOCs")
     print(f"  {CYAN}report <id>{RESET}        - Pull a markdown incident report")
+    print(f"  {CYAN}playbook <id>{RESET}      - Show suggested response actions for an incident")
+    print(f"  {CYAN}dashboard{RESET}          - Live auto-refreshing incident board (Ctrl+C to exit)")
+    print(f"  {CYAN}intel update{RESET}       - Pull the latest known-bad IP feed (no API key needed)")
+    print(f"  {CYAN}intel status{RESET}       - Show threat intel cache status")
     print(f"  {CYAN}help{RESET}               - Show this menu again")
     print(f"  {CYAN}exit{RESET}               - Exit ABEKE")
     print()
@@ -173,6 +182,56 @@ def cmd_report(incident_id):
         print(f"{BLUE}{'-' * 60}{RESET}")
 
 
+def cmd_playbook(incident_id):
+    data = api_get(f"/incidents/{incident_id}/playbook")
+    if data:
+        print(f"{BOLD}{YELLOW}Suggested Response Actions:{RESET}")
+        for block in data.get("playbook", []):
+            print(f"{CYAN}{block['event_type']}{RESET}")
+            for action in block["actions"]:
+                print(f"  - {WHITE}{action}{RESET}")
+
+
+def cmd_intel(sub):
+    if sub == "update":
+        print(f"{GRAY}Pulling latest threat feed (public list, no API key needed)...{RESET}")
+        data = api_post("/intel/update", {})
+        if data:
+            if data.get("ok"):
+                print(f"{GREEN}Loaded {data['count']} known-bad IPs into cache.{RESET}")
+            else:
+                print(f"{YELLOW}Feed update failed: {data.get('error')}{RESET}")
+    elif sub == "status":
+        data = api_get("/intel/status")
+        if data:
+            print(f"{CYAN}Threat intel cache:{RESET} {data}")
+    else:
+        print(f"{YELLOW}Usage: intel update | intel status{RESET}")
+
+
+def cmd_dashboard():
+    print(f"{GRAY}Live dashboard — refreshing every 4s. Press Ctrl+C to exit.{RESET}")
+    try:
+        while True:
+            data = api_get("/incidents/")
+            print("\033[2J\033[H", end="")
+            print(f"{BOLD}{BLUE}{'ABEKE LIVE DASHBOARD':^60}{RESET}")
+            print(f"{GRAY}{datetime.datetime.now():%Y-%m-%d %H:%M:%S}{RESET}")
+            print(f"{BLUE}{'-' * 60}{RESET}")
+            if data:
+                if not data:
+                    print(f"{GRAY}No incidents yet. Try 'ingest' from another session.{RESET}")
+                for inc in sorted(data, key=lambda x: -x["severity_score"]):
+                    sev = inc["severity_score"]
+                    color = RED if sev >= 50 else (YELLOW if sev >= 20 else GREEN)
+                    print(f"{color}[{sev:>5.1f}]{RESET} {WHITE}{inc['title']:<35}{RESET}{CYAN}{inc['status']}{RESET}")
+            print(f"{BLUE}{'-' * 60}{RESET}")
+            print(f"{GRAY}Ctrl+C to exit{RESET}")
+            time.sleep(4)
+    except KeyboardInterrupt:
+        print(f"\n{CYAN}Exiting dashboard.{RESET}")
+
+
 def cmd_use(n):
     try:
         idx = int(n) - 1
@@ -211,6 +270,12 @@ def main():
             cmd_iocs()
         elif cmd == "report" and len(parts) > 1:
             cmd_report(parts[1])
+        elif cmd == "playbook" and len(parts) > 1:
+            cmd_playbook(parts[1])
+        elif cmd == "dashboard":
+            cmd_dashboard()
+        elif cmd == "intel" and len(parts) > 1:
+            cmd_intel(parts[1])
         elif cmd == "use" and len(parts) > 1:
             cmd_use(parts[1])
         else:
