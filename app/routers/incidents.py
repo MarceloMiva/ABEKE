@@ -40,6 +40,8 @@ def update_incident(incident_id: str, update: schemas.IncidentUpdate, db: Sessio
         incident.status = update.status
     if update.analyst_notes is not None:
         incident.analyst_notes = update.analyst_notes
+    if update.assigned_to is not None:
+        incident.assigned_to = update.assigned_to
 
     db.commit()
     db.refresh(incident)
@@ -52,6 +54,29 @@ def get_incident_playbook(incident_id: str, db: Session = Depends(get_db)):
     if not incident:
         raise HTTPException(status_code=404, detail="Incident not found")
     return {"incident_id": incident.id, "playbook": playbooks.get_playbook(incident)}
+
+
+@router.get("/{incident_id}/timeline", response_model=dict)
+def get_incident_timeline(incident_id: str, db: Session = Depends(get_db)):
+    incident = db.query(models.Incident).get(incident_id)
+    if not incident:
+        raise HTTPException(status_code=404, detail="Incident not found")
+
+    events = sorted(incident.events, key=lambda e: e.timestamp)
+    buckets = {}
+    for e in events:
+        label = e.timestamp.strftime("%H:%M")
+        buckets[label] = buckets.get(label, 0) + 1
+
+    return {
+        "incident_id": incident.id,
+        "title": incident.title,
+        "buckets": buckets,
+        "events": [
+            {"timestamp": e.timestamp.isoformat(), "event_type": e.event_type, "src_ip": e.src_ip}
+            for e in events
+        ],
+    }
 
 
 @router.get("/{incident_id}/report", response_model=dict)

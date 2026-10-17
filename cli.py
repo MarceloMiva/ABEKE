@@ -18,10 +18,9 @@ try:
 except ImportError:
     HAS_REQUESTS = False
 
-# ---- Blue theme (ANSI) ----
-BLUE = "\033[38;5;33m"        # main banner / headline blue
-LIGHT_BLUE = "\033[38;5;75m"  # acronym letters — lighter shade
-MUTED_BLUE = "\033[38;5;67m"  # acronym words — muted shade
+BLUE = "\033[38;5;33m"
+LIGHT_BLUE = "\033[38;5;75m"
+MUTED_BLUE = "\033[38;5;67m"
 CYAN = "\033[38;5;45m"
 DIM_BLUE = "\033[38;5;24m"
 GREEN = "\033[92m"
@@ -63,6 +62,11 @@ CATEGORIES = [
     ("Threat Intel Feed", "/intel",         2, "ACTIVE"),
     ("Playbook Automation", "/incidents/{id}/playbook", 1, "ACTIVE"),
     ("Live Dashboard",    "cli: dashboard", 1, "ACTIVE"),
+    ("Live Log Tailing",  "tail.py",        1, "ACTIVE"),
+    ("Alert Webhooks",    "services/webhook.py", 2, "ACTIVE"),
+    ("Timeline Graphs",   "/incidents/{id}/timeline", 1, "ACTIVE"),
+    ("Multi-Analyst",     "cli: assign",    1, "ACTIVE"),
+    ("Demo Mode",         "demo.py",        1, "ACTIVE"),
 ]
 
 
@@ -103,8 +107,14 @@ def banner():
     print(f"  {CYAN}dashboard{RESET}          - Live auto-refreshing incident board (Ctrl+C to exit)")
     print(f"  {CYAN}intel update{RESET}       - Pull the latest known-bad IP feed (no API key needed)")
     print(f"  {CYAN}intel status{RESET}       - Show threat intel cache status")
+    print(f"  {CYAN}assign <id> <name>{RESET} - Assign an incident to an analyst")
+    print(f"  {CYAN}timeline <id>{RESET}      - ASCII timeline graph of an incident's events")
     print(f"  {CYAN}help{RESET}               - Show this menu again")
     print(f"  {CYAN}exit{RESET}               - Exit ABEKE")
+    print()
+    print(f"{GRAY}Run separately (own terminal session):{RESET}")
+    print(f"  {CYAN}python tail.py <logfile>{RESET}   - Auto-ingest a live log file in real time")
+    print(f"  {CYAN}python demo.py{RESET}             - Flood the pipeline with a fake attack for demos")
     print()
 
 
@@ -127,6 +137,19 @@ def api_post(path, payload):
         return None
     try:
         r = requests.post(f"{API_BASE}{path}", json=payload, timeout=5)
+        return r.json()
+    except Exception as e:
+        print(f"{YELLOW}Couldn't reach ABEKE API at {API_BASE} — is uvicorn running?{RESET}")
+        print(f"{GRAY}{e}{RESET}")
+        return None
+
+
+def api_patch(path, payload):
+    if not HAS_REQUESTS:
+        print(f"{YELLOW}requests not installed — run: pip install requests{RESET}")
+        return None
+    try:
+        r = requests.patch(f"{API_BASE}{path}", json=payload, timeout=5)
         return r.json()
     except Exception as e:
         print(f"{YELLOW}Couldn't reach ABEKE API at {API_BASE} — is uvicorn running?{RESET}")
@@ -161,8 +184,9 @@ def cmd_incidents():
         if not data:
             print(f"{GRAY}No incidents yet — try 'ingest' first.{RESET}")
         for inc in data:
+            analyst = inc.get("assigned_to") or "unassigned"
             print(f"{YELLOW}{inc['id'][:8]}{RESET}  {WHITE}{inc['title']:<30}{RESET}"
-                  f"{CYAN}sev={inc['severity_score']:<6}{RESET}{GREEN}{inc['status']}{RESET}")
+                  f"{CYAN}sev={inc['severity_score']:<6}{RESET}{GREEN}{inc['status']:<14}{RESET}{MUTED_BLUE}{analyst}{RESET}")
 
 
 def cmd_iocs():
@@ -232,6 +256,28 @@ def cmd_dashboard():
         print(f"\n{CYAN}Exiting dashboard.{RESET}")
 
 
+def cmd_assign(incident_id, analyst):
+    data = api_patch(f"/incidents/{incident_id}", {"assigned_to": analyst})
+    if data:
+        print(f"{GREEN}Assigned{RESET} {data.get('title')} {CYAN}-> {analyst}{RESET}")
+
+
+def cmd_timeline(incident_id):
+    data = api_get(f"/incidents/{incident_id}/timeline")
+    if data:
+        print(f"{BOLD}{BLUE}Timeline — {data.get('title')}{RESET}")
+        buckets = data.get("buckets", {})
+        if not buckets:
+            print(f"{GRAY}No events yet.{RESET}")
+            return
+        max_count = max(buckets.values())
+        for label in sorted(buckets.keys()):
+            count = buckets[label]
+            bar_len = int((count / max_count) * 30) if max_count else 0
+            bar = "█" * bar_len
+            print(f"{GRAY}{label}{RESET} {LIGHT_BLUE}{bar}{RESET} {WHITE}{count}{RESET}")
+
+
 def cmd_use(n):
     try:
         idx = int(n) - 1
@@ -276,6 +322,10 @@ def main():
             cmd_dashboard()
         elif cmd == "intel" and len(parts) > 1:
             cmd_intel(parts[1])
+        elif cmd == "assign" and len(parts) > 2:
+            cmd_assign(parts[1], parts[2])
+        elif cmd == "timeline" and len(parts) > 1:
+            cmd_timeline(parts[1])
         elif cmd == "use" and len(parts) > 1:
             cmd_use(parts[1])
         else:

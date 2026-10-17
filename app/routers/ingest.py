@@ -5,21 +5,13 @@ from sqlalchemy.orm import Session
 
 from .. import models, schemas
 from ..database import get_db
-from ..services import correlation, scoring, mitre_mapping, ioc_extraction
+from ..services import correlation, scoring, mitre_mapping, ioc_extraction, webhook
 
 router = APIRouter(prefix="/ingest", tags=["ingest"])
 
 
 @router.post("/event", response_model=schemas.IncidentOut)
 def ingest_event(event_in: schemas.RawEventIn, db: Session = Depends(get_db)):
-    """
-    Single entry point for feeding ABEKE logs/alerts. Pipeline:
-    1. store the raw event
-    2. correlate it into an incident (new or existing)
-    3. extract IOCs from the payload
-    4. re-map MITRE techniques for the incident
-    5. recompute severity score
-    """
     event = models.RawEvent(
         source=event_in.source,
         event_type=event_in.event_type,
@@ -46,5 +38,10 @@ def ingest_event(event_in: schemas.RawEventIn, db: Session = Depends(get_db)):
     scoring.score_incident(db, incident)
     db.commit()
     db.refresh(incident)
+
+    if webhook.notify_if_critical(incident):
+        incident.webhook_sent = True
+        db.commit()
+        db.refresh(incident)
 
     return incident

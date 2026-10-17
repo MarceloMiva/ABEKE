@@ -39,6 +39,7 @@ class IncidentOut(BaseModel):
     mitre_techniques: List[str] = []
     created_at: datetime
     iocs: List[IOCOut] = []
+    assigned_to: Optional[str] = None
 
     class Config:
         from_attributes = True
@@ -47,3 +48,4 @@ class IncidentOut(BaseModel):
 class IncidentUpdate(BaseModel):
     status: Optional[str] = None
     analyst_notes: Optional[str] = None
+    assigned_to: Optional[str] = None
